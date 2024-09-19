@@ -1,0 +1,223 @@
+initialize() { 			
+				
+				defineCfgParam("DENSITY_GROWTH_CHARACTER", 1.0);
+			
+			// Overlapping generation
+				defineCfgParam("WEEKS_OF_GENERATION", 6);
+				survival_rate = c(1);
+				for (i in 1:WEEKS_OF_GENERATION){
+    				survival_rate = c(survival_rate,(WEEKS_OF_GENERATION-i)/(WEEKS_OF_GENERATION-i+1));
+   			}
+    	      defineConstant("INITIAL_FEMALE_AGE_DISTRIBUTION",c(WEEKS_OF_GENERATION,WEEKS_OF_GENERATION:1)/sum(1:WEEKS_OF_GENERATION));
+    			defineConstant("INITIAL_MALE_AGE_DISTRIBUTION",INITIAL_FEMALE_AGE_DISTRIBUTION);
+    			defineConstant("SURVIVE_RATE",survival_rate);
+            defineConstant("GENERATION_TIME",sum(c(1:WEEKS_OF_GENERATION)*INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION])); 
+           
+				defineCfgParam("FEMALE_RIDL_VAR", T);
+       		
+        		defineCfgParam("VIABILITY_MODEL", T);
+
+			// 3.1.3 Resistance phase parameters:
+				defineCfgParam("NUM_CUT_PHASES",1);
+
+			// 3.1.5 General drive parameters:
+				defineCfgParam("NUM_GRNAS", 1);
+				
+			// 3.1.6 Ecology and drop parameters:
+				defineCfgParam("CAPACITY", 1000);
+				defineCfgParam("RELEASE_RATIO", 3.6); 
+				defineCfgParam("DROP_SIZE", CAPACITY/2*RELEASE_RATIO/GENERATION_TIME);
+				print(DROP_SIZE);
+				defineCfgParam("MAX_ATTEMPTS_TO_FIND_SUITABLE_MATE", 10);
+				defineCfgParam("LOW_DENSITY_GROWTH_RATE", 6);
+				defineCfgParam("MAX_OFFSPRING", 100); //this is average number of eggs laid by a female in one generation
+				// when doing genetic load: 200 or more
+				defineCfgParam("MALE_ONLY_DROP", T);
+				defineCfgParam("FEMALE_ONLY_DROP", F);
+				defineCfgParam("HETEROZYGOUS_DROP", F);
+				defineConstant("INBREEDING_AVOIDANCE_FACTOR", 0.0); //if negative, % inc. if positive, % dec.
+				defineConstant("INBREEDING_FECUNDITY_PENALTY", 0.0); //from 0 - 1, always % dec.
+
+		// 3.2 Calculate activity step between each gRNA.
+			defineConstant("GRNA_ACTIVITY_STEP", 0);
+
+			initializeSLiMModelType("nonWF");
+			// This simulation will use a non-Wright-Fisher model.
+
+		// 3.3 Four variations: Wild type, drive, r1 resistance, r2 resistance.
+				wt = initializeMutationType("m1", 0.5, "f", 0.0);
+				dr = initializeMutationType("m2", 0.5, "f", 0.0);
+				r1 = initializeMutationType("m3", 0.5, "f", 0.0);
+				r2 = initializeMutationType("m4", 0.5, "f", 0.0);
+				cut = initializeMutationType("m5", 0.5, "f", 0.0);
+				gap = initializeMutationType("m6", 0.5, "f", 0.0);
+				variations = c(wt, dr, r1, r2, cut, gap);
+				// 'cut' is a temporary placeholder, and 'gap' represents a missing segment.
+
+		// 3.4 Variations are all part of g1 genome element.
+			initializeGenomicElementType("g1", variations, c(1, 1, 1, 1, 1, 1));
+
+		// 3.5 Element is NUM_GRNAS long, each spot on 
+		// the element representing a GRNA target location.
+			initializeGenomicElement(g1, 0, 0);
+
+		// 3.6 These variations overwrite one another.
+			variations.mutationStackPolicy = "l";
+			variations.mutationStackGroup = 1;
+
+		// 3.7 No mutation in this model.
+			initializeMutationRate(0.0);
+			initializeRecombinationRate(0.0);
+
+		// 3.8 Simulate sexual reproduction: A for autosome.
+			initializeSex("A");
+	}
+
+// 4. A HELPER FUNCTION FOR CONSTANTS THAT MAY ASLO BE CONFIGURED VIA COMMAND LINE.
+	function (void) defineCfgParam(string$ name, lifs value) {
+		if (!exists(name))
+			defineConstant(name, value);
+		}
+
+// 12. GENE DRIVE IMPLEMENTATION RULES THAT OCCUR IN EVERY CHILD.
+1: modifyChild() {
+		
+		// 12.5.1 Booleans describing presence of R2 allele:
+			
+			dr_count = sum(child.genomes.countOfMutationsOfType(m2) == NUM_GRNAS);
+
+		if (FEMALE_RIDL_VAR & child.sex == F & dr_count >= 1)
+			return F;
+		
+	return T;
+	}
+
+//REPRODUCTION RULES FOR EACH FEMALE.
+	reproduction(NULL, "F") {
+	
+			selected_mate = subpop.sampleIndividuals(1, sex="M");
+			
+	  if (VIABILITY_MODEL){
+	  		
+	  		num_offspring = rpois(1, MAX_OFFSPRING/GENERATION_TIME);}
+	  
+		for (i in seqLen(num_offspring)){
+			offspring = subpop.addCrossed(individual, selected_mate);
+			
+			offspring.tag = 0;
+			}
+}
+	
+//START THE SIMULATION BY ADDING AN INITIAL WILD POPULATION.
+1 early() {
+	// Start with a population of wild type flies.
+	sim.addSubpop("p1", asInteger(CAPACITY*(1+MAX_OFFSPRING*0.5/GENERATION_TIME)));
+	all = p1.individuals;
+	sim.setValue("npops", 1);
+	female_ages = size(INITIAL_FEMALE_AGE_DISTRIBUTION)-1;
+   male_ages = size(INITIAL_FEMALE_AGE_DISTRIBUTION)-1;
+   for (ind in all){
+   	ind.tag = 0;
+    	if (ind.sex=="F") {
+    		ind.age = sample(0:female_ages,1,F,c(MAX_OFFSPRING*0.5/GENERATION_TIME,INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION]));
+    	}
+    	else {
+    		ind.age = sample(0:male_ages,1,F,c(MAX_OFFSPRING*0.5/GENERATION_TIME,INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION]));
+    	}
+    }
+
+	for (i in seqLen(NUM_GRNAS))
+		p1.individuals.genomes.addNewDrawnMutation(m1, i);
+}
+
+//// AGE BASED SURVIVAL RULES
+early() {
+	if (VIABILITY_MODEL){	
+		all = p1.individuals;
+		new_larva = sum(all.age == 0);
+		female = all[all.sex == "F"];
+		adult_female = sum(female.age > 0);
+		for(ind in all){
+			ind.fitnessScaling = SURVIVE_RATE[ind.age];
+			drive_on_1 = ind.genome1.countOfMutationsOfType(m2) == NUM_GRNAS;
+			drive_on_2 = ind.genome2.countOfMutationsOfType(m2) == NUM_GRNAS;
+			if(ind.age == 0){
+				competition_ratio = new_larva / (MAX_OFFSPRING * 0.5 * CAPACITY/GENERATION_TIME);
+				viability = DENSITY_GROWTH_CHARACTER * (INITIAL_FEMALE_AGE_DISTRIBUTION[0] * (((1 - LOW_DENSITY_GROWTH_RATE) * competition_ratio) + LOW_DENSITY_GROWTH_RATE) / (MAX_OFFSPRING / GENERATION_TIME / 2)) + (1 - DENSITY_GROWTH_CHARACTER) * (2 * INITIAL_FEMALE_AGE_DISTRIBUTION[0] * LOW_DENSITY_GROWTH_RATE/(MAX_OFFSPRING / GENERATION_TIME)/ (((LOW_DENSITY_GROWTH_RATE - 1) * competition_ratio) + 1));//CHARACTER*LINEAR + (1-CHARACTER)*CONCAVE
+				ind.fitnessScaling = ifelse(viability<0,0.0,viability);}
+		}	
+	}
+}
+
+
+//// DROP A GROUP OF MODIFIED INDIVIDUALS INTO THE POPULATION. 
+
+10: early() {
+	id_num = sim.getValue("npops") + 1;
+	sim.setValue("npops", id_num);
+	
+	if (MALE_ONLY_DROP)
+		sim.addSubpop(id_num, asInteger(DROP_SIZE), 1.0);
+	else if (FEMALE_ONLY_DROP)
+		sim.addSubpop(id_num, asInteger(DROP_SIZE), 0.0);
+	else
+		sim.addSubpop(id_num, asInteger(DROP_SIZE));
+	
+	drop = sim.subpopulations[id_num-1].individuals;	
+	drop.age = 1;	
+	drop.tag = 1;
+	
+	for (i in seqLen(NUM_GRNAS))
+		drop.genomes.addNewDrawnMutation(m2, i);
+	//drop.genomes.addNewDrawnMutation(m7, 3+NUM_GRNAS);//****** release Cas9 homo
+	
+	if (HETEROZYGOUS_DROP)
+		for (i in seqLen(NUM_GRNAS))
+			drop.genome2.addNewDrawnMutation(m1, i);
+
+	p1.takeMigrants(drop);
+}
+
+
+early() {
+// 20.1 Calculate rates that we are intersted in:
+			
+	all = p1.individuals;		
+	adult=all[all.age > 0];	
+	m = all[all.sex == "M"];
+	f = all[all.sex == "F"];
+	adult_f = f[f.age > 0];
+	total_adults = sum(all.age > 0);
+	total_adult_females = sum(f.age > 0);			
+			
+	num_wt = 0;
+	num_dr = 0;			
+			
+	num_wt = sum(all.genomes.countOfMutationsOfType(m1) == NUM_GRNAS);
+	num_dr = sum(adult.genomes.countOfMutationsOfType(m2) == NUM_GRNAS);
+	num_has_drive = sum(adult.genome1.countOfMutationsOfType(m2) == NUM_GRNAS | adult.genome2.countOfMutationsOfType(m2) == NUM_GRNAS);
+	rate_wt = num_wt / (2 * size(all));
+	rate_dr = num_dr / (2 * size(adult));
+	rate_has_drive = num_has_drive / (size(adult));
+		
+	num_fertile_female = sum(adult_f.countOfMutationsOfType(m1) == 2);
+			
+	this_gen = sim.cycle;
+			
+	Constant_GL = 0;	
+			
+	catn("OUT:: " + this_gen + " " + total_adults + " " + total_adult_females + " " + num_fertile_female + " " + rate_dr + " " + rate_has_drive + " " + RELEASE_RATIO + " " + Constant_GL + " " + DENSITY_GROWTH_CHARACTER);
+			
+	if(num_fertile_female == 0 | p1.individualCount == 0){
+		catn("SUPPRESSED:: " + this_gen + " " + total_adults + " " + total_adult_females + " " + num_fertile_female + " " + rate_dr + " " + rate_has_drive + " " + RELEASE_RATIO + " " + Constant_GL + " " + DENSITY_GROWTH_CHARACTER);
+	
+	sim.simulationFinished();
+					}			
+			}
+
+
+// 21. PROGRAM END CONDITION.
+267 late() {
+	catn("NOT:: ");
+	sim.simulationFinished();
+}
