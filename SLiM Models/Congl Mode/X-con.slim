@@ -1,0 +1,201 @@
+initialize() { 			
+			// genetic load runs only
+				defineConstant("BONUS_POP_FACTOR", 1.0);
+				defineConstant("PREV_BONUS_POP_FACTOR", 1.0);
+				defineConstant("PREV_MEASURED_EXPECTED_POP", 1.0);
+
+			// Overlapping generation
+				defineCfgParam("WEEKS_OF_GENERATION", 6);
+				survival_rate = c(1);
+				for (i in 1:WEEKS_OF_GENERATION){
+    				survival_rate = c(survival_rate,(WEEKS_OF_GENERATION-i)/(WEEKS_OF_GENERATION-i+1));
+   			}
+    	      defineConstant("INITIAL_FEMALE_AGE_DISTRIBUTION",c(WEEKS_OF_GENERATION,WEEKS_OF_GENERATION:1)/sum(1:WEEKS_OF_GENERATION));
+    			defineConstant("INITIAL_MALE_AGE_DISTRIBUTION",INITIAL_FEMALE_AGE_DISTRIBUTION);
+    			defineConstant("SURVIVE_RATE",survival_rate);
+            defineConstant("GENERATION_TIME",sum(c(1:WEEKS_OF_GENERATION)*INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION])); 
+           
+				
+				defineCfgParam("X_SHRED_RATE", 1.0);
+
+
+			// 3.1.6 Ecology and drop parameters:
+				defineCfgParam("NUM_GRNAS",1);
+				defineCfgParam("CAPACITY", 1000);
+				defineCfgParam("RELEASE_RATIO", 1.3); 
+				defineCfgParam("DROP_SIZE", CAPACITY/2*RELEASE_RATIO/GENERATION_TIME);
+				print(DROP_SIZE);
+				defineCfgParam("MAX_ATTEMPTS_TO_FIND_SUITABLE_MATE", 10);
+				defineCfgParam("LOW_DENSITY_GROWTH_RATE", 6);
+				defineCfgParam("MAX_OFFSPRING", 100); //this is average number of eggs laid by a female in one generation
+				// when doing genetic load: 200 or more
+				defineCfgParam("MALE_ONLY_DROP", T);
+				defineCfgParam("FEMALE_ONLY_DROP", F);
+				defineCfgParam("HETEROZYGOUS_DROP", T);
+				defineConstant("INBREEDING_AVOIDANCE_FACTOR", 0.0); //if negative, % inc. if positive, % dec.
+				defineConstant("INBREEDING_FECUNDITY_PENALTY", 0.0); //from 0 - 1, always % dec.
+
+			initializeSLiMModelType("nonWF");
+			// This simulation will use a non-Wright-Fisher model.
+
+		// 3.3 Four variations: Wild type, drive, r1 resistance, r2 resistance.
+				wt = initializeMutationType("m1", 0.5, "f", 0.0);
+				dr = initializeMutationType("m2", 0.5, "f", 0.0);
+				
+				variations = c(wt, dr);
+				// 'cut' is a temporary placeholder, and 'gap' represents a missing segment.
+
+		// 3.4 Variations are all part of g1 genome element.
+			initializeGenomicElementType("g1", variations, c(1, 1));
+
+		// 3.5 Element is NUM_GRNAS long, each spot on 
+		// the element representing a GRNA target location.
+			initializeGenomicElement(g1, 0, 0);
+
+		// 3.6 These variations overwrite one another.
+			variations.mutationStackPolicy = "l";
+			variations.mutationStackGroup = 1;
+
+		// 3.7 No mutation in this model.
+			initializeMutationRate(0.0);
+			initializeRecombinationRate(0.0);
+
+		// 3.8 Simulate sexual reproduction: A for autosome.
+			initializeSex("A");
+	}
+
+// 4. A HELPER FUNCTION FOR CONSTANTS THAT MAY ASLO BE CONFIGURED VIA COMMAND LINE.
+	function (void) defineCfgParam(string$ name, lifs value) {
+		if (!exists(name))
+			defineConstant(name, value);
+		}
+
+modifyChild(){
+child.tag = 0;
+return T;
+}
+
+//REPRODUCTION RULES FOR EACH FEMALE.
+	reproduction(NULL){
+	self.active = 0;
+	this_gen = sim.cycle;
+	all = p1.individuals;
+	females = all[all.sex == "F"];
+	males = all[all.sex == "M"];
+	adult_f = females[females.age > 0];
+	adult_m = males[males.age > 0];
+	total_f = sum(females.age > 0);
+	adult = all[all.age > 0];
+	wild_adult = adult[adult.tag == 0];
+	total_wild_adult = sum(adult.tag == 0);
+	
+	sex_ratio = 1 - (0.5 * (1 - X_SHRED_RATE)) / (0.5 + (0.5 * (1 - X_SHRED_RATE)));
+	
+	offspring = total_f;
+	
+	litter = MAX_OFFSPRING * (CAPACITY/2) / offspring;
+	
+	genetic_load = 1 - (offspring/(CAPACITY/2));
+	
+	num_offspring = litter/GENERATION_TIME;
+	
+	catn("OUT:: " + this_gen + " " + total_wild_adult + " " + total_f + " " + RELEASE_RATIO + " " + genetic_load + " " + X_SHRED_RATE);	
+	
+	if(total_f == 0 | p1.individualCount == 0){
+			catn("SUPPRESSED:: " + this_gen + " " + total_wild_adult + " " + total_f + " " + RELEASE_RATIO + " " + genetic_load + " " + X_SHRED_RATE);
+			sim.simulationFinished();} 
+	
+	if(genetic_load >= 0.99){
+	catn("SUPPRESSED:: " + this_gen + " " + total_wild_adult + " " + total_f + " " + RELEASE_RATIO + " " + genetic_load + " " + X_SHRED_RATE);
+	sim.tag = 1;
+	return;}
+	
+	for (female in adult_f){
+	selected_mate = p1.sampleIndividuals(1, sex="M");
+	
+	for (i in seqLen(asInteger(num_offspring))){
+	if (selected_mate.countOfMutationsOfType(m2))
+				subpop.addCrossed(female, selected_mate, sex_ratio);
+			else
+				offspring = subpop.addCrossed(female, selected_mate);}			
+	
+	}
+	
+}	
+	
+//START THE SIMULATION BY ADDING AN INITIAL WILD POPULATION.
+1 early() {
+	// Start with a population of wild type flies.
+	sim.addSubpop("p1", asInteger(CAPACITY*(1+MAX_OFFSPRING*0.5/GENERATION_TIME)));
+	all = p1.individuals;
+	sim.setValue("npops", 1);
+	sim.tag = 0;
+	female_ages = size(INITIAL_FEMALE_AGE_DISTRIBUTION)-1;
+   male_ages = size(INITIAL_FEMALE_AGE_DISTRIBUTION)-1;
+   for (ind in all){
+   	ind.tag = 0;
+    	if (ind.sex=="F") {
+    		ind.age = sample(0:female_ages,1,F,c(MAX_OFFSPRING*0.5/GENERATION_TIME,INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION]));
+    	}
+    	else {
+    		ind.age = sample(0:male_ages,1,F,c(MAX_OFFSPRING*0.5/GENERATION_TIME,INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION]));
+    	}
+    }
+
+	for (i in seqLen(NUM_GRNAS))
+		p1.individuals.genomes.addNewDrawnMutation(m1, i);
+}
+
+//// AGE BASED SURVIVAL RULES
+early() {
+		
+		all = p1.individuals;
+		new_larva = sum(all.age == 0);
+		
+		competition_ratio = new_larva / (MAX_OFFSPRING * 0.5 * CAPACITY/GENERATION_TIME);
+		viability = INITIAL_FEMALE_AGE_DISTRIBUTION[0] * (((1 - LOW_DENSITY_GROWTH_RATE) * competition_ratio) + LOW_DENSITY_GROWTH_RATE) / (MAX_OFFSPRING / GENERATION_TIME / 2);
+		for(ind in all){
+			ind.fitnessScaling = SURVIVE_RATE[ind.age];
+			if(ind.age == 0){
+				
+				ind.fitnessScaling = ifelse(viability<0,0.0,viability);}
+			
+	}
+}
+
+//// DROP A GROUP OF MODIFIED INDIVIDUALS INTO THE POPULATION. 
+
+10: early() {
+	id_num = sim.getValue("npops") + 1;
+	sim.setValue("npops", id_num);
+	
+	if (MALE_ONLY_DROP)
+		sim.addSubpop(id_num, asInteger(DROP_SIZE), 1.0);
+	else if (FEMALE_ONLY_DROP)
+		sim.addSubpop(id_num, asInteger(DROP_SIZE), 0.0);
+	else
+		sim.addSubpop(id_num, asInteger(DROP_SIZE));
+	
+	drop = sim.subpopulations[id_num-1].individuals;	
+	drop.age = 1;	
+	drop.tag = 1;
+	
+	for (i in seqLen(NUM_GRNAS))
+		drop.genomes.addNewDrawnMutation(m2, i);
+	
+	if (HETEROZYGOUS_DROP)
+		for (i in seqLen(NUM_GRNAS))
+			drop.genome2.addNewDrawnMutation(m1, i);
+	
+	p1.takeMigrants(drop);
+}
+
+// 21. PROGRAM END CONDITION.
+late(){
+	if (sim.tag == 1)
+		sim.simulationFinished();}
+
+150 late() {
+	catn("NOT:: ");
+	sim.simulationFinished();
+}

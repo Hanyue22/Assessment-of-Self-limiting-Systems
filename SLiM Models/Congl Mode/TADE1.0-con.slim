@@ -1,0 +1,337 @@
+// Overlapping Generation.
+// Viability Model.
+// Constant-population Mode ON in this model.
+// Distant-site TADE.
+// Always keep EMBRYO_RESISTANCE_RATE = 1.0 in this model.
+
+initialize() {
+    // Fitness parameters:
+    defineCfgParam("DRIVE_FITNESS_VALUE", 0.7);
+    defineConstant("R2_FITNESS_VALUE", 1.0);
+    
+    // Overlapping generation
+	 defineCfgParam("WEEKS_OF_GENERATION", 6);
+	 survival_rate = c(1);
+	 for (i in 1:WEEKS_OF_GENERATION){
+    survival_rate = c(survival_rate,(WEEKS_OF_GENERATION-i)/(WEEKS_OF_GENERATION-i+1));
+    }
+    defineConstant("INITIAL_FEMALE_AGE_DISTRIBUTION",c(WEEKS_OF_GENERATION,WEEKS_OF_GENERATION:1)/sum(1:WEEKS_OF_GENERATION));
+    defineConstant("INITIAL_MALE_AGE_DISTRIBUTION",INITIAL_FEMALE_AGE_DISTRIBUTION);
+    defineConstant("SURVIVE_RATE",survival_rate);
+    defineConstant("GENERATION_TIME",sum(c(1:WEEKS_OF_GENERATION)*INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION])); 
+
+    // Resistance phase parameters:
+    defineCfgParam("GERMLINE_RESISTANCE_RATE", 0.95);
+    defineCfgParam("EMBRYO_RESISTANCE_RATE", 1.0);
+
+    // Drop parameters:
+    defineCfgParam("CAPACITY", 1000);
+	 defineCfgParam("RELEASE_RATIO",0.4);
+	 defineCfgParam("LOW_DENSITY_GROWTH_RATE",6.0);	
+	 defineCfgParam("DROP_SIZE",CAPACITY/2*RELEASE_RATIO/GENERATION_TIME);
+    defineConstant("MALE_ONLY_DROP", T);
+    defineConstant("FEMALE_ONLY_DROP", F);
+    defineConstant("HETEROZYGOUS_DROP", T);
+
+    // Ecology parameters:
+    defineConstant("MAX_ATTEMPTS_TO_FIND_SUITABLE_MATE", 10);
+    defineConstant("MAX_OFFSPRING", 100);
+    // End configuration variables.
+
+    // This simulation will use a non-Wright-Fisher model.
+    initializeSLiMModelType("nonWF");
+
+    // Variations.
+    wt1 = initializeMutationType("m1", 0.5, "f", 0.0);
+    dr = initializeMutationType("m2", 0.5, "f", 0.0);
+   
+    wt2 = initializeMutationType("m3", 0.5, "f", 0.0);
+    r2 = initializeMutationType("m4", 0.5, "f", 0.0);
+    
+    variations1 = c(wt1, dr);
+    variations2 = c(wt2, r2);
+
+    // Variations are all part of g1 genome element.
+    initializeGenomicElementType("g1", variations1, c(1, 1));
+    initializeGenomicElementType("g2", variations2, c(1, 1));
+
+    // Element is NUM_LOCI long, each spot on the element representing a drive location.
+    
+    initializeGenomicElement(g1, 1, 1);
+    initializeGenomicElement(g2, 3, 3);
+
+    // These variations overwrite one another.
+    variations1.mutationStackPolicy = "l";
+    variations1.mutationStackGroup = 1;
+	 variations2.mutationStackPolicy = "l";
+    variations2.mutationStackGroup = 1;
+   
+    // No mutation in this model.
+    initializeMutationRate(0.0);
+
+    // All sites are independent.
+    
+    initializeRecombinationRate(0.5);
+
+    // Simulate sexual reproduction: A for autosome.
+    initializeSex("A");
+}
+
+function (void)defineCfgParam(string$ name, lifs value) {
+    if (!exists(name))
+        defineConstant(name, value);
+}
+
+//// HELPER FUNCTION FOR FORMING A RESISTANCE ALLELE AT A GIVEN LOCUS.
+function (void)addResistanceAllele(o<Genome>$ genome, i$ locus) {
+	genome.addNewDrawnMutation(m4, locus);
+}
+
+//// FUNCTION FOR CAS9 EFFECTS IN THE GERMLINE AND EMBRYO.
+function (void)driveResistance(o<Genome>$ child_chromosome, o<Individual>$ parent, f$ resistance_rate) {
+    // If parent doesn't have drive allele, nothing happens.
+    if (!sum(parent.genomes.countOfMutationsOfType(m2)))
+        return;
+
+    // Child must be inheritting wt2 to cut, or nothing happens.
+    if (!child_chromosome.countOfMutationsOfType(m3))
+        return;
+
+    if (runif(1) < resistance_rate)
+        addResistanceAllele(child_chromosome, 3);
+}
+
+//// HELPER FUNCTION TO OVERWRITE ONE GENOME WITH ANOTHER.
+function (void)copy_genome(o<Genome>$ source, o<Genome>$ destination) {
+    m1_loci = source.positionsOfMutationsOfType(m1);
+    m2_loci = source.positionsOfMutationsOfType(m2);
+    m3_loci = source.positionsOfMutationsOfType(m3);
+    m4_loci = source.positionsOfMutationsOfType(m4);
+    for (i in seqAlong(m1_loci))
+        destination.addNewDrawnMutation(m1, m1_loci[i]);
+    for (i in seqAlong(m2_loci))
+        destination.addNewDrawnMutation(m2, m2_loci[i]);
+    for (i in seqAlong(m3_loci))
+        destination.addNewDrawnMutation(m3, m3_loci[i]);
+    for (i in seqAlong(m4_loci))
+        destination.addNewDrawnMutation(m4, m4_loci[i]);
+}
+
+//// GENE DRIVE IMPLEMENTATION RULES THAT OCCUR IN EVERY CHILD.
+1: modifyChild() {
+
+    // Apply effects that happen in the germline.
+    
+    driveResistance(child.genome1, parent1, GERMLINE_RESISTANCE_RATE);
+    driveResistance(child.genome2, parent2, GERMLINE_RESISTANCE_RATE);
+
+    // Apply effects that happen in the embryo.
+    
+    driveResistance(child.genome1, parent1, EMBRYO_RESISTANCE_RATE);
+    driveResistance(child.genome2, parent1, EMBRYO_RESISTANCE_RATE);
+    
+    // Resistance alleles can have the affect of rendering offspring non-viable with many of these systems.
+    
+    dr = sum(child.genomes.countOfMutationsOfType(m2)==1);
+    r2 = sum(child.genomes.countOfMutationsOfType(m4)==1);        
+    if (r2 > dr)
+       return F;
+  return T;
+}
+
+//// RULES FOR FITNESS BASED ON GENOTYPE.
+function (f$)genotypeFitness(o<Individual>$ ind) {
+  fitness_value = 1.0;
+  		dr_count = sum(ind.genomes.countOfMutationsOfType(m2) == 1);  
+ 	 	r2_count = sum(ind.genomes.countOfMutationsOfType(m4) == 1);
+ 	 if (!dr_count | dr_count == 2)
+ 	 	return fitness_value;
+    if (dr_count == r2_count)
+    	fitness_value = DRIVE_FITNESS_VALUE;
+    if (dr_count > r2_count)
+    	fitness_value = sqrt(DRIVE_FITNESS_VALUE);
+    
+return fitness_value;}
+
+//// FUNCTION FOR EVALUATING INFERTILITY CAUSED BY SUPRESSION DRIVES.
+function (logical)isInfertile(o<Individual>$ ind) {
+    if (ind.sex == "F") {
+    	dr = sum(ind.genomes.countOfMutationsOfType(m2)==1);
+            if (dr == 2)
+                return T;
+    }
+   return F;
+}
+
+//// REPRODUCTION RULES FOR CONSTANT POPULATION GENETIC LOAD.
+reproduction(NULL){
+	self.active = 0;
+	this_gen = sim.cycle;
+	all = p1.individuals;
+	females = all[all.sex == "F"];
+	males = all[all.sex == "M"];
+	adult_f = females[females.age > 0];
+	adult_m = males[males.age > 0];
+	total_f = sum(females.age > 0);	
+	females_fertile = c();
+	for (female in adult_f){
+	females_fertile = c(females_fertile, female[!isInfertile(female)]);}	
+	total_fertile_f = size(females_fertile);	
+	
+	ww_ww_f = sum(adult_f.countOfMutationsOfType(m1) == 2 & adult_f.countOfMutationsOfType(m3) == 2);
+	wd_ww_f = sum(adult_f.countOfMutationsOfType(m1) == 1 & adult_f.countOfMutationsOfType(m3) == 2);
+	wd_wr_f = sum(adult_f.countOfMutationsOfType(m1) == 1 & adult_f.countOfMutationsOfType(m3) == 1);
+	
+	total_ww_ww_m = sum(adult_m.countOfMutationsOfType(m1) == 2 & adult_m.countOfMutationsOfType(m3) == 2);
+	total_wd_ww_m = sum(adult_m.countOfMutationsOfType(m1) == 1 & adult_m.countOfMutationsOfType(m3) == 2);
+	total_wd_wr_m = sum(adult_m.countOfMutationsOfType(m1) == 1 & adult_m.countOfMutationsOfType(m3) == 1);
+	total_dd_ww_m = sum(adult_m.countOfMutationsOfType(m2) == 2 & adult_m.countOfMutationsOfType(m3) == 2);
+	total_dd_wr_m = sum(adult_m.countOfMutationsOfType(m2) == 2 & adult_m.countOfMutationsOfType(m3) == 1);
+	total_dd_rr_m = sum(adult_m.countOfMutationsOfType(m2) == 2 & adult_m.countOfMutationsOfType(m4) == 2);
+	
+	total_males = total_ww_ww_m + total_wd_ww_m * sqrt(DRIVE_FITNESS_VALUE) + total_wd_wr_m * DRIVE_FITNESS_VALUE + total_dd_ww_m + total_dd_wr_m + total_dd_rr_m;
+
+	ww_ww_m = total_ww_ww_m/total_males;
+	wd_ww_m = total_wd_ww_m * sqrt(DRIVE_FITNESS_VALUE)/total_males;
+	wd_wr_m = total_wd_wr_m * DRIVE_FITNESS_VALUE/total_males;
+	dd_ww_m = total_dd_ww_m/total_males;
+	dd_wr_m = total_dd_wr_m/total_males;
+	dd_rr_m = total_dd_rr_m/total_males;
+	
+	con1_1 = ww_ww_f * ww_ww_m;//all viable
+	con1_2 = ww_ww_f * wd_ww_m;//(1-cut/2) viable
+	con1_3 = ww_ww_f * wd_wr_m;//(0.75-cut/4) viable
+	con1_456 = ww_ww_f * (dd_ww_m + dd_wr_m + dd_rr_m);//all viable
+
+	con2_1 = wd_ww_f * ww_ww_m;//NON VIABLE
+	con2_2 = wd_ww_f * wd_ww_m;//1/4 VIABLE
+	con2_3 = wd_ww_f * wd_wr_m;//1/4 VIABLE
+	con2_4 = wd_ww_f * dd_ww_m;//1/2 VIABLE
+	con2_5 = wd_ww_f * dd_wr_m;//1/2 VIABLE
+	con2_6 = wd_ww_f * dd_rr_m;//1/2 VIABLE
+	
+	con3_1 = wd_wr_f * ww_ww_m;//NON VIABLE
+	con3_2 = wd_wr_f * wd_ww_m;//1/4 VIABLE
+	con3_3 = wd_wr_f * wd_wr_m;//1/4 VIABLE
+	con3_4 = wd_wr_f * dd_ww_m;//1/2 VIABLE
+	con3_5 = wd_wr_f * dd_wr_m;//1/2 VIABLE
+	con3_6 = wd_wr_f * dd_rr_m;//1/2 VIABLE
+
+	
+	offspring = con1_1 +
+	 				con1_2*(1-GERMLINE_RESISTANCE_RATE/2) +
+	 				con1_3*(0.75-GERMLINE_RESISTANCE_RATE/4) +
+				   con1_456 +
+				   	   
+				 ((con2_2 + con2_3)*1/4 +
+	 			  (con2_4 + con2_5 + con2_6)*1/2 )*sqrt(DRIVE_FITNESS_VALUE) +
+	 				
+	 			 ((con3_2 + con3_3)*1/4 +
+	 			  (con3_4 + con3_5 + con3_6)*1/2 )*DRIVE_FITNESS_VALUE;
+	
+	litter = MAX_OFFSPRING*(CAPACITY/2)/offspring;	
+	
+	genetic_load = 1 - (offspring/(CAPACITY/2));
+	
+	catn("OUT:: " + this_gen + " " + total_f + " " + total_fertile_f + " " + RELEASE_RATIO + " " + genetic_load + " " + GERMLINE_RESISTANCE_RATE);	
+	
+	if(size(females_fertile) == 0 | p1.individualCount == 0){
+			catn("SUPPRESSED:: " + this_gen + " " + total_f + " " + total_fertile_f + " " + RELEASE_RATIO + " " + genetic_load + " " + GERMLINE_RESISTANCE_RATE);
+			sim.simulationFinished();} 
+			
+	if(genetic_load >= 0.99){
+	catn("SUPPRESSED:: " + this_gen + " " + total_f + " " + total_fertile_f + " " + RELEASE_RATIO + " " + genetic_load + " " + GERMLINE_RESISTANCE_RATE);
+	sim.tag = 1;
+	return;} 
+	
+	for (female in females_fertile){
+		attempt_no = 0;
+		while (1) {
+			selected_mate = p1.sampleIndividuals(1, sex="M");
+			if (!selected_mate.size())
+				return; 
+			mate_attractiveness = genotypeFitness(selected_mate);
+			if (runif(1) < mate_attractiveness)
+				break; 
+			attempt_no = attempt_no + 1;
+			if (attempt_no == MAX_ATTEMPTS_TO_FIND_SUITABLE_MATE)
+				return;
+		}		
+	
+	num_offspring = litter * genotypeFitness(female)/GENERATION_TIME;
+	for (i in seqLen(asInteger(num_offspring))){
+	offspring = subpop.addCrossed(female, selected_mate);}
+	}
+}	
+
+//START THE SIMULATION BY ADDING AN INITIAL WILD POPULATION.
+1 early() {
+	// Start with a population of wild type flies.
+	sim.addSubpop("p1", asInteger(CAPACITY*(1+MAX_OFFSPRING*0.5/GENERATION_TIME)));
+	all = p1.individuals;
+	sim.setValue("npops", 1);
+	sim.tag = 0;
+	female_ages = size(INITIAL_FEMALE_AGE_DISTRIBUTION)-1;
+   male_ages = size(INITIAL_FEMALE_AGE_DISTRIBUTION)-1;
+   for (ind in all){
+   	if (ind.sex=="F") {
+    		ind.age = sample(0:female_ages,1,F,c(MAX_OFFSPRING*0.5/GENERATION_TIME,INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION]));
+    	}
+    	else {
+    		ind.age = sample(0:male_ages,1,F,c(MAX_OFFSPRING*0.5/GENERATION_TIME,INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION]));
+    	}
+    }	
+  p1.individuals.genomes.addNewDrawnMutation(m1, 1);
+  p1.individuals.genomes.addNewDrawnMutation(m3, 3);
+}
+    
+
+//// AGE BASED SURVIVAL RULES
+early() {
+	all = p1.individuals;
+	new_larva = sum(all.age == 0);
+	female = all[all.sex == "F"];
+	adult_female = sum(female.age > 0);
+	for(ind in all){
+		ind.fitnessScaling = SURVIVE_RATE[ind.age];		
+			if(ind.age == 0){
+				competition_ratio = new_larva / (MAX_OFFSPRING * 0.5 * CAPACITY/GENERATION_TIME);
+				viability = INITIAL_FEMALE_AGE_DISTRIBUTION[0] * (((1 - LOW_DENSITY_GROWTH_RATE) * competition_ratio) + LOW_DENSITY_GROWTH_RATE) / (MAX_OFFSPRING / GENERATION_TIME / 2);
+				ind.fitnessScaling = ifelse(viability<0,0.0,viability);}
+			}			
+	}
+
+//// DROP A GROUP OF MODIFIED INDIVIDUALS INTO THE POPULATION.
+10: early() {
+	id_num = sim.getValue("npops") + 1;
+	sim.setValue("npops", id_num);
+	if (MALE_ONLY_DROP)
+		sim.addSubpop(id_num, asInteger(DROP_SIZE), 1.0);
+	else if (FEMALE_ONLY_DROP)
+		sim.addSubpop(id_num, DROP_SIZE, 0.0);
+	else
+		sim.addSubpop(id_num, DROP_SIZE);
+		
+	drop = sim.subpopulations[id_num-1].individuals;	
+	drop.age == 1;
+
+  // Now set the drop individuals to the correct genotypes:
+   
+   drop.genomes.addNewDrawnMutation(m2, 1);
+   drop.genomes.addNewDrawnMutation(m3, 3);
+
+   if (HETEROZYGOUS_DROP)
+   drop.genome2.addNewDrawnMutation(m1, 1);
+                
+	p1.takeMigrants(drop);
+        }
+
+//// PROGRAM END CONDITION.
+late(){
+	if (sim.tag == 1)
+		sim.simulationFinished();}
+
+150 late() {
+		catn("NOT:: ");
+    	sim.simulationFinished();
+}
