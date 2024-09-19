@@ -20,12 +20,12 @@ initialize() {
     defineConstant("GENERATION_TIME",sum(c(1:WEEKS_OF_GENERATION)*INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION])); 
 
     // Resistance phase parameters:
-    defineCfgParam("GERMLINE_RESISTANCE_RATE", 0.7);
+    defineCfgParam("GERMLINE_RESISTANCE_RATE", 0.8);
     defineCfgParam("EMBRYO_RESISTANCE_RATE", 0.0);
 
     // Drop parameters:
-    defineCfgParam("CAPACITY", 1000);
-	 defineCfgParam("RELEASE_RATIO",3.0);
+    defineCfgParam("CAPACITY", 2000);
+	 defineCfgParam("RELEASE_RATIO", 0.78);
 	 defineCfgParam("LOW_DENSITY_GROWTH_RATE",6.0);	
 	 defineCfgParam("DROP_SIZE",CAPACITY/2*RELEASE_RATIO/GENERATION_TIME);
     defineConstant("MALE_ONLY_DROP", T);
@@ -136,8 +136,7 @@ function (void)copy_genome(o<Genome>$ source, o<Genome>$ destination) {
 function (f$)genotypeFitness(o<Individual>$ ind) {
   fitness_value = 1.0;
   		dr_count = sum(ind.genomes.countOfMutationsOfType(m2) == 1);  
- 	 	r2_count = sum(ind.genomes.countOfMutationsOfType(m4) == 1);
-	 if (ind.sex == "F" & dr_count == 1 & r2_count == 0) 
+	 if (ind.sex == "F" & dr_count == 1) 
     	fitness_value = DRIVE_FITNESS_VALUE;
     
 return fitness_value;}
@@ -145,10 +144,10 @@ return fitness_value;}
 //// FUNCTION FOR EVALUATING INFERTILITY CAUSED BY SUPRESSION DRIVES.
 function (logical)isInfertile(o<Individual>$ ind) {
     	dr = sum(ind.genomes.countOfMutationsOfType(m2) == 1);
-    	r2 = sum(ind.genomes.countOfMutationsOfType(m4) == 1);
+    	r2_no_dr = sum(ind.genomes.countOfMutationsOfType(m4) == 1 & ind.genomes.countOfMutationsOfType(m2) == 0);
       if (dr == 2)
                 return T;
-      if (ind.sex == "F" & r2 > 0)   	
+      if (ind.sex == "F" & r2_no_dr > 0)   	
     				 return T;
     				 
    return F;
@@ -171,10 +170,10 @@ reproduction(NULL) {
 	total_fertile_f = size(females_fertile);
 	total_fertile_m = sum(adult_m.countOfMutationsOfType(m1) > 0);
 	
-	f1 = sum(adult_f.countOfMutationsOfType(m1) == 1 & adult_f.countOfMutationsOfType(m4) == 0);
-	f2 = total_fertile_f - f1;	
+	f1 = sum(adult_f.countOfMutationsOfType(m1) == 2 & adult_f.countOfMutationsOfType(m4) == 0);
+	f2 = total_fertile_f - f1;
 	
-	offspring = (f1 * DRIVE_FITNESS_VALUE + f2) * total_fertile_m / total_m;	
+	offspring = (f1 + f2 * DRIVE_FITNESS_VALUE ) * total_fertile_m / total_m;	
 	
 	litter = MAX_OFFSPRING * (CAPACITY/2)/offspring;
 	
