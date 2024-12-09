@@ -1,15 +1,20 @@
 # Assessment-of-Self-limiting-Systems
 
 All models used in this program can be found in SLiM Models. 
+
 Models in 'Normal' directory simulate performance of different systems with realistic ecology.
+
 Models in 'Constant-population genetic load' are only used to collect data of constant-population genetic load.
+
 If you're interested in the calculation of constant-population genetic load, see the 'reproduction' callback of models in 'Constant-population genetic load'. 
 
 SIT, RIDL systems and homing drives except the split female sterile homing drive are combined in one model.
+
 If you want to model SIT or RIDL, switch 'HOMING' to 'F' in the 'initializing' callback, otherwise keep it as 'T'.
+
 When you model different systems, you may also want to check the output section, especially the calculation of fertile females.
 
-Other models are each built for one specific system.
+Other models (including all constant-population genetic load models) are each built for one specific system, so please do not change the system type in 'initializing' callback.
 
 You can vary 'DRIVE_CONVERSION_RATE', 'LATE_GERMLINE_RESISTANCE_CUT_RATE', 'EMBRYO_RESISTANCE_CUT_RATE' and 'RELEASE_RATIO' in the 'initializing' callback, and keep other settings as default.
 
