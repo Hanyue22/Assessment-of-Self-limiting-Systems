@@ -1,4 +1,7 @@
-// Last modified by Yue Han at 20241209.
+// Overlapping Generation.
+// Viability Model.
+// Constant-population Mode OFF in this model.
+// Always keep R1_OCCURRENCE_RATE = 0.0 in this model.
 
 // Construction: Element on Y chromosome targets a haplolethal gene on X chromosome. Any offspring inheriting X chromosome with an R2 allele will be non-viable and don't contribute to the competition.
 
@@ -16,14 +19,14 @@ initialize() {
     defineConstant("GENERATION_TIME",sum(c(1:WEEKS_OF_GENERATION)*INITIAL_FEMALE_AGE_DISTRIBUTION[1:WEEKS_OF_GENERATION])); 
 
     // Resistance phase parameters:
-    defineCfgParam("GERMLINE_RESISTANCE_RATE", 0.85);
+    defineCfgParam("GERMLINE_RESISTANCE_RATE", 0.88);
     defineCfgParam("R1_OCCURRENCE_RATE", 0.0);//Always keep it 0.0
     defineCfgParam("EMBRYO_RESISTANCE_RATE", 0.0);
-	 defineCfgParam("DRIVE_FITNESS_VALUE", 1.0);
+	 defineCfgParam("DRIVE_FITNESS_VALUE", 0.7);
 
     // Drop parameters:
-    defineCfgParam("CAPACITY", 1000);
-	 defineCfgParam("RELEASE_RATIO", 0.1);
+    defineCfgParam("CAPACITY", 5000);
+	 defineCfgParam("RELEASE_RATIO", 1.0);
 	 defineCfgParam("LOW_DENSITY_GROWTH_RATE", 6.0);	
 	 defineCfgParam("DROP_SIZE",CAPACITY/2*RELEASE_RATIO/GENERATION_TIME);
     defineConstant("MALE_ONLY_DROP", T);
@@ -144,9 +147,6 @@ function (void)copy_genome(o<Genome>$ source, o<Genome>$ destination) {
     driveResistance(child.genome1, parent1, GERMLINE_RESISTANCE_RATE);
     driveResistance(child.genome2, parent2, GERMLINE_RESISTANCE_RATE);
     
-    driveResistance(child.genome1, parent1, EMBRYO_RESISTANCE_RATE);
-    driveResistance(child.genome2, parent1, EMBRYO_RESISTANCE_RATE);
-    
     r2 = sum(child.genomes.countOfMutationsOfType(m5)==1);        
     
     if (r2)
@@ -158,6 +158,9 @@ function (void)copy_genome(o<Genome>$ source, o<Genome>$ destination) {
 //// RULES FOR FITNESS BASED ON GENOTYPE.
 function (f$)genotypeFitness(o<Individual>$ ind) {
   fitness_value = 1.0;
+  if (ind.sex == "M")// Only males would have drive
+  	if (ind.genome2.countOfMutationsOfType(m3) > 0)// drives are only on the Y-chromosomes.
+  		fitness_value = DRIVE_FITNESS_VALUE;
   return fitness_value;}
 
 //// FUNCTION FOR EVALUATING INFERTILITY CAUSED BY SUPRESSION DRIVES.
@@ -293,7 +296,7 @@ early() {
 			adult_f = f[f.age > 0];
 			adult_m = m[m.age > 0];
 			total_adults = sum(all.age > 0);
-			total_adult_females = sum(f.age > 0);		
+			total_adult_females = sum(f.age > 0);	
 			
 			num_dr = sum(all.genomes.countOfMutationsOfType(m3) == 1);
 			rate_dr = num_dr / (2 * size(all));
